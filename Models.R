@@ -9,7 +9,7 @@ library(glmmTMB)
 library(parameters)
 library(performance)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
 data_raw <- data_raw %>%
@@ -147,7 +147,7 @@ library(writexl)
 library(glmmTMB)
 library(parameters)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
@@ -301,7 +301,7 @@ library(patchwork)
 library(ggtext)
 library(scales)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
@@ -442,7 +442,7 @@ library(parameters)
 library(DHARMa)
 library(performance)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
 data_raw <- data_raw %>%
@@ -535,7 +535,7 @@ library(parameters)
 library(DHARMa)
 library(performance)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
 data_raw <- data_raw %>%
@@ -625,7 +625,7 @@ library(parameters)
 library(DHARMa)
 library(performance)
 
-data_raw <- read_excel("Supporting information - Appendix S1.xlsx")
+data_raw <- read_excel("dataset.xlsx")
 data_raw$community_cluster <- as.character(data_raw$community_cluster)
 
 data_raw <- data_raw %>%
