@@ -306,9 +306,6 @@ params_pl <- parameters::parameters(model_pl3.2)
 cat("\n===== AIC =====\n")
 cat("Plasmodium:", AIC(model_pl3.2), "\n\n")
 
-cat("===== PARÂMETROS =====\n")
-print(params_pl)
-
 cat("\n===== SINGULARITY =====\n")
 print(check_singularity(model_pl3.2))
 
