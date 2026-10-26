@@ -1,0 +1,228 @@
+//-------------------------------------------------------------------------------------------------------------
+// INPUT ASSET: `pontos` — sampling points / community clusters
+//-------------------------------------------------------------------------------------------------------------
+// The script assumes a pre-existing Earth Engine FeatureCollection:
+//
+//   projects/subtle-seat-379912/assets/Lis/tentativa2
+//
+// WHAT IT CONTAINS 
+//   • One feature per community cluster centroid;
+//   • Geometry: Point (WGS84 / EPSG:4326);
+//   • Attributes: an identifier column (`community_cluster`)
+//
+// HOW IT WAS CREATED  
+//   1. Compile the sampling-point table (CSV) with columns:
+//      community_cluster, latitude, longitude (you can find it in dataset.xlsx)
+//   2. Upload to Earth Engine:
+//         Assets ▸ NEW ▸ CSV file (.csv) 
+//      → Set the asset path to `projects/<your-project>/assets/Lis/tentativa2`.
+
+//---------------------------------------------------------------------------------------------------------------
+// SECTION 1 — HUMAN INFLUENCE INDEX (HII)
+//---------------------------------------------------------------------------------------------------------------
+
+// GOAL: For each sampling point, compute median + min/max of the overall
+// HII and of each of its 7 driver layers, within a 10 km square buffer.
+//
+// YEAR-BY-YEAR: HII was collected year by year. Before running, set
+// YEAR below, and update BOTH filterDate windows AND the export names.
+// Run once per year; export each year to a SEPARATE CSV.
+
+// SET THE YEAR HERE -----------------------------------------------------------------------------------
+// Change this to the sampling year you are processing (e.g., 2019, 2020...).
+var YEAR = 2019;
+// Build the date window: [YYYY-01-01, YYYY+1-01-01).
+var START = YEAR + '-01-01';
+var END   = (YEAR + 1) + '-01-01';
+
+// LOAD POINTS -------------------------------------------------------------------------------------------
+var pontos = ee.FeatureCollection('projects/subtle-seat-379912/assets/Lis/tentativa2');
+
+// REUSABLE BUFFER FUNCTION ---------------------------------------------------------------------
+// radius in metres; bounds=true returns the bounding square of the buffer.
+function bufferPoints(radius, bounds) { return function(pt) {
+pt = ee.Feature(pt);
+return bounds ? pt.buffer(radius).bounds() : pt.buffer(radius);
+};
+}
+
+// BUILD 10 KM SQUARE BUFFERS --------------------------------------------------------------------
+var pointBuffers = pontos.map(bufferPoints(10000, true));
+
+// OVERALL HII --------------------------------------------------------------------------------------------
+// Uses START/END defined above — do NOT hard-code the year here.
+var hiiCollection = ee.ImageCollection('projects/HII/v1/hii')
+.filterDate(START, END)
+.filterBounds(pontos);
+
+var hiiMedian = hiiCollection.median();
+var hiiScaled = hiiMedian.divide(118);   // rescale to 0–1
+
+var hiiPorPonto = hiiScaled.reduceRegions({
+  collection: pointBuffers,
+  reducer: ee.Reducer.median().combine(ee.Reducer.minMax(), null, true),
+  scale: 1000
+});
+
+print('HII Principal Escalado (primeiros 5):', hiiPorPonto.limit(5));
+
+// DRIVERS ---------------------------------------------------------------------------------------------
+var drivers = ['infrastructure','land_use','population_density','power','railways','roads','water'];
+
+function extractDriverStats(driverName) {
+  // Uses the SAME START/END, so drivers match the overall HII year.
+  var driverCollection = ee.ImageCollection('projects/HII/v1/driver/' + driverName)
+    .filterDate(START, END)
+    .filterBounds(pontos);
+
+  var driverMedian = driverCollection.median();
+  var driverScaled = driverMedian.divide(118);
+
+  return driverScaled.reduceRegions({
+    collection: pointBuffers,
+    reducer: ee.Reducer.median().combine(ee.Reducer.minMax(), null, true),
+    scale: 1000
+  });
+}
+
+//  EXPORTS (one CSV per year, separate from other years) ------------------------------
+// F1. Overall HII — filename includes YEAR so files don't collide.
+Export.table.toDrive({
+  collection: hiiPorPonto,
+  description: 'HII_principal_escalado_' + YEAR,
+  folder: 'EarthEngine',
+  fileNamePrefix: 'HII_principal_escalado_' + YEAR,
+  fileFormat: 'CSV'
+});
+
+// F2. Loop over the 7 drivers — one CSV per driver per year.
+// Each export is SEPARATE and tagged with YEAR in its name.
+drivers.forEach(function(driver) {
+  var driverData = extractDriverStats(driver);
+  print('Driver ' + driver + ' escalado (primeiros 2):', driverData.limit(2));
+  Export.table.toDrive({
+    collection: driverData,
+    description: 'HII_' + driver + '_escalado_' + YEAR,
+    folder: 'EarthEngine',
+    fileNamePrefix: 'HII_' + driver + '_escalado_' + YEAR,
+    fileFormat: 'CSV'
+  });
+});
+
+//---------------------------------------------------------------------------------------------------------------
+// SECTION 2 — NDVI
+///--------------------------------------------------------------------------------------------------------------
+// GOAL: Median NDVI within 10 km square buffers around each point,
+//       using Landsat 7 TOA imagery.
+//
+// YEAR-BY-YEAR: NDVI was collected year by year. Before running, set
+//  YEAR below; the filterDate and the export name both use it.
+//    Run once per year; export each year to a SEPARATE CSV.
+
+//  SET THE YEAR HERE ------------------------------------------------------------------------------------
+var YEAR = 2019;
+var START = YEAR + '-01-01';
+var END   = (YEAR + 1) + '-01-01';
+
+// LOAD POINTS --------------------------------------------------------------------------------------------
+var pontos = ee.FeatureCollection('projects/subtle-seat-379912/assets/Lis/tentativa2');
+
+// LOAD AND CLOUD-FILTER LANDSAT 7 -------------------------------------------------------------
+// Uses START/END from above.
+var landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_TOA')
+  .filterDate(START, END)
+  .filterBounds(pontos)
+  .filter(ee.Filter.lt('CLOUD_COVER', 20));
+
+// ADD NDVI BAND ----------------------------------------------------------------------------------------
+// Landsat 7 TOA: B4 = NIR, B3 = Red.
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B4','B3']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+var landsatwithndvi = landsat7.map(addNDVI);
+var ndvimedian = landsatwithndvi.select('NDVI').median();
+
+// BUFFER FUNCTION + BUFFERS ---------------------------------------------------------------------
+function bufferPoints(radius, bounds) { return function(pt) {
+  pt = ee.Feature(pt);
+  return bounds ? pt.buffer(radius).bounds() : pt.buffer(radius);
+};}
+var pointBuffers = pontos.map(bufferPoints(10000, true));
+
+// REDUCE NDVI PER BUFFER -------------------------------------------------------------------------
+var ndviPorPonto = ndvimedian.reduceRegions({
+  collection: pointBuffers,
+  reducer: ee.Reducer.median(),
+  scale: 30,
+  tileScale: 4
+});
+
+// EXPORT (one CSV per year) -------------------------------------------------------------------------
+Export.table.toDrive({
+  collection: ndviPorPonto,
+  description: 'NDVI_por_buffer_quadrado_10km_' + YEAR,
+  folder: 'EarthEngine',
+  fileNamePrefix: 'NDVI_por_buffer_quadrado_10km_' + YEAR,
+  fileFormat: 'CSV'
+});
+
+//--------------------------------------------------------------------------------------------------------------
+// SECTION 3 — CLIMATIC VARIABLES (WORLDCLIM BIO)
+//--------------------------------------------------------------------------------------------------------------
+// GOAL: Median of bio01–bio19 within 10 km square buffers. Temperatures
+// converted from tenths of °C to °C.
+//
+//  WorldClim v1 BIO is a CLIMATE NORMAL (long-term
+//  average, not a single-year product). It does NOT have a per-year
+//  filterDate. If your study uses year-specific climate, switch to
+//  WORLDCLIM/V1/BIO is NOT suitable — use a yearly product such as
+//  'WORLDCLIM/V1/MONTHLY' aggregated per year, or ERA5-Land, and add
+//  .filterDate(START, END) to the collection accordingly.
+//
+//    For the current script (static BIO), run ONCE - the output is the
+//    same for every year, so do NOT duplicate it per year.
+
+// LOAD POINTS -------------------------------------------------------------------------------------------
+var pontos = ee.FeatureCollection('projects/subtle-seat-379912/assets/Lis/tentativa2');
+
+// BUFFER FUNCTION + BUFFERS ---------------------------------------------------------------------
+function bufferPoints(radius, bounds) { return function(pt) {
+  pt = ee.Feature(pt);
+  return bounds ? pt.buffer(radius).bounds() : pt.buffer(radius);
+};}
+var pointBuffers = pontos.map(bufferPoints(10000, true));
+
+// LOAD WORLDCLIM BIO ------------------------------------------------------------------------------
+var bio = ee.Image("WORLDCLIM/V1/BIO");
+
+// BAND LISTS ---------------------------------------------------------------------------------------------
+var bandasTemperatura = [
+  'bio01','bio02','bio03','bio04','bio05','bio06',
+  'bio07','bio08','bio09','bio10','bio11'
+];
+var bandasNaoTemperatura = [
+  'bio12','bio13','bio14','bio15','bio16','bio17','bio18','bio19'
+];
+
+// UNIT CONVERSION + RECOMBINE ----------------------------------------------------------------
+var temperaturasCelsius = bio.select(bandasTemperatura).divide(10);
+var outrasVariaveis     = bio.select(bandasNaoTemperatura);
+var bioConvertido       = temperaturasCelsius.addBands(outrasVariaveis);
+
+// REDUCE AND EXPORT --------------------------------------------------------------------------------
+var bioPorPonto = bioConvertido.reduceRegions({
+  collection: pointBuffers,
+  reducer: ee.Reducer.median(),
+  scale: 1000
+});
+
+// Static climate normal - no YEAR in the filename (same for all years).
+Export.table.toDrive({
+  collection: bioPorPonto,
+  description: 'WorldClim_BIO_Public_Buffer10km_Celsius',
+  folder: 'EarthEngine',
+  fileNamePrefix: 'WorldClim_BIO_Public_Buffer10km_Celsius',
+  fileFormat: 'CSV'
+});
